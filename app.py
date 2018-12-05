@@ -22,8 +22,9 @@ with open(join(getcwd(), '.env')) as environment:
 		os.environ[key[0]] = re.sub('\n','',key[1])
 
 # Twitter
-import tweepy 
 from tweepy import OAuthHandler 
+from tweepy.streaming import StreamListener
+from tweepy import Stream
 from textblob import TextBlob 
 
 CONSUMER_KEY = os.environ['consumer_key']
@@ -48,7 +49,7 @@ from pythonosc import osc_server
 
 class OSCClient(multiprocessing.Process):
 
-	def __init__(self, address, port=8000):
+	def __init__(self, address='localhost', port=8000):
 
 		multiprocessing.Process.__init__(self)
 		self.dispatcher = dispatcher.Dispatcher()
@@ -57,20 +58,18 @@ class OSCClient(multiprocessing.Process):
 
 		# client = udp_client.UDPClient('localhost', 8000)
 	def run(self):
-		
+
 		# OSC Stuff
 		# self.dispatcher.map("/filter", print)
 		self.dispatcher.map("/filter", self.print_message)
 
 		self.server = osc_server.ThreadingOSCUDPServer(
-		      (self.address, self.port), self.dispatcher)
+			  (self.address, self.port), self.dispatcher)
 		print("Serving on {}".format(self.server.server_address))
 		self.server.serve_forever()
 
 	def print_message(self, unused_addr, args):
 		print (args)
-
-	  # print("[{0}] ~ {1}".format(args[0]))
 
 def pafy_video(video_id):
 	url = 'https://www.youtube.com/watch?v={0}'.format(video_id)
@@ -165,6 +164,17 @@ class TwitterClient(object):
 			# print error (if any) 
 			print("Error : " + str(e)) 
 
+class TwitterListener(StreamListener):
+	""" A listener handles tweets that are received from the stream.
+	This is a basic listener that just prints received tweets to stdout.
+	"""
+	def on_data(self, data):
+		print(data)
+		return True
+
+	def on_error(self, status):
+		print(status)
+
 class YouTubeClient(object):
 	def __init__(self, service_name, api_version, developer_key): 
 
@@ -199,20 +209,22 @@ class YouTubeClient(object):
 
 if __name__ == '__main__':
 
-	# parser = argparse.ArgumentParser()
-	# parser.add_argument('--q', help='Search term', default='Google')
-	# parser.add_argument('--max-results', help='Max results', default=1)
-	# args = parser.parse_args()
-
 	# creating object of TwitterClient Class 
-	twitterApi = TwitterClient(CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET) 
+	# twitterApi = TwitterClient(CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET) 
 	youtubeApi = YouTubeClient(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, DEVELOPER_KEY)
-
-	dataframeTweets = pd.DataFrame()
+	
+	twitterListener = TwitterListener()
+	twitterAuth = OAuthHandler(CONSUMER_KEY, CONSUMER_SECRET)
+	twitterAuth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
 
 	workerOSC = OSCClient(address = '127.0.0.1', port = 8000)
 	workerOSC.daemon = True
 	workerOSC.start()
+
+	stream = Stream(twitterAuth, twitterListener)
+	stream.filter(track=['@MTW_LIVE'])
+
+	dataframeTweets = pd.DataFrame()
 
 	while True:
 
