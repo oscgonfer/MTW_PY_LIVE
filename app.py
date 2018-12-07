@@ -63,28 +63,35 @@ class OSCClient(multiprocessing.Process):
 	def run(self):
 
 		# OSC Stuff
-		# self.dispatcher.map("/filter", print)
 		self.dispatcher.map("/filter", self.print_message)
+		self.dispatcher.map("/reset", self.reset_status)
+
 
 		self.server = osc_server.ThreadingOSCUDPServer(
 			  (self.address, self.port), self.dispatcher)
-		print("Serving OSC on {}".format(self.server.server_address))
+		print("[Debug] Serving OSC on {}".format(self.server.server_address))
 		self.server.serve_forever()
 
-	def print_message(self, unused_addr, args):
-		print (args)
+	def print_message(self, unused_addr, message):
+		print (message)
 
-def downloadYT(video_id, outname):
+	def reset_status(self, unused_addr, message):
+		twitterListener.start(num_buttons = 16)
+
+		# Check new topic and copy 16 videos
+
+def downloadYT(video_id, video_name, outname):
 
 	url = 'https://www.youtube.com/watch?v={0}'.format(video_id)
-	outtmpl = join(save_path, str(outname) + '.mp3')
 
-	print ('[Debug] Downloading', url, 'to', outtmpl)
+	print ('[Debug] Downloading', url, 'to', outname + '.mp3')
 
 	ydl_opts = {
 		'format': 'bestaudio/best',
-		'outtmpl' : outtmpl,
+ 		'extractaudio': True,
+ 		'outtmpl': 'vids/%(id)s.%(ext)s',
 		'verbose' : True,
+		'forcefilename': True,
 		'postprocessors': [{
 			'key': 'FFmpegExtractAudio',
 			'preferredcodec': 'mp3',
@@ -95,6 +102,19 @@ def downloadYT(video_id, outname):
 	with youtube_dl.YoutubeDL(ydl_opts) as ydl:
 		ydl.download([url])
 
+	filename = video_id + '.mp3'
+	original_name = join(getcwd(), 'vids', filename)
+	target_name = join(save_path, outname + '.mp3')
+
+	print ('[Debug] Moving file', original_name, 'to', target_name)
+
+	if os.path.isfile(original_name):
+		os.rename(original_name, target_name)
+		print ('[Debug] File moved')
+	else:
+		print ('[Debug] File does not exist')
+
+	print ('[Debug] Finished video download')
 
 class TwitterListener(StreamListener):
 	""" A listener handles tweets that are received from the stream.
@@ -102,7 +122,7 @@ class TwitterListener(StreamListener):
 	"""
 	def start(self, num_buttons):
 		self.num_buttons = num_buttons
-		self.list_replace = range(0,self.num_buttons-1)
+		self.list_replace = range(0,self.num_buttons)
 		self.index_replace = 0
 	
 	def clean_tweet(self, tweet): 
@@ -120,7 +140,7 @@ class TwitterListener(StreamListener):
 
 		# calling function to get tweets 
 		now = datetime.datetime.now()
-		print (now.strftime('[%Y-%m-%d %H:%M:%S]'), 'Got new tweet')
+		print ('[Debug]', now.strftime('[%Y-%m-%d %H:%M:%S]'), 'Got new tweet')
 
 		# empty dictionary to store required params of a tweet 
 		parsed_tweet = {} 
@@ -130,39 +150,62 @@ class TwitterListener(StreamListener):
 		parsed_tweet['date'] = status.created_at
 
 		# saving sentiment of tweet 
-		parsed_tweet['clean_text'] = self.clean_tweet(re.sub('LIVE ', '', status.text))
-
-		list_tweets.append(parsed_tweet)
+		# parsed_tweet['clean_text'] = self.clean_tweet(re.sub('LIVE ', '', status.text))
 		
-		youtubeQuery = parsed_tweet['clean_text']
-		print ('Checking for', youtubeQuery)
+		parsed_tweet['clean_text'] = re.sub('@MTW_LIVE ', '', status.text)
+		list_tweets.append(parsed_tweet)
 
-		videos = youtubeApi.youtube_search(query = youtubeQuery, max_results = self.num_buttons)
+		# Check what it is
+		try:
+			check_quote = re.findall(r'"([^"]*)"', parsed_tweet['clean_text'])
+		except:
+			check_quote = ''
+		
+		replace_name = self.list_replace[self.index_replace]
+		outname = 'S'+str(replace_name)
 
-		if videos:
-			print ('This is the first video', videos[0][0])
-			replace_name = self.list_replace[self.index_replace]
-			outname = 'S'+str(replace_name)
+		print (parsed_tweet['clean_text'], check_quote)
+		if check_quote != '':
+			# Assume they want a readout
+			bashCommand = "say -v Trinoids -o " + outname + '.aiff ' + str(check_quote)
+			os.system(bashCommand)
+			print ('[Debug]', bashCommand)			
+			bashCommand = ('lame -m m ' + outname + '.aiff ' + outname + '.mp3')
+			os.system(bashCommand)
+			print ('[Debug]', bashCommand)
+			bashCommand = ('rm ' + outname + '.aiff')
+			os.system(bashCommand)
+			print ('[Debug]', bashCommand)			
+			bashCommand = ('mv ' + outname + '.mp3 ' + 'vids/' + outname + '.mp3')
+			os.system(bashCommand)
+			print ('[Debug]', bashCommand)
+		else:
 
-			print ('Submitting to thread', videos[0][1], 'with name', outname)
+			youtubeQuery = parsed_tweet['clean_text']
+			print ('[Debug] Checking for', youtubeQuery)
 
-			with concurrent.futures.ThreadPoolExecutor(max_workers = 1) as executor:
-				executor.submit(downloadYT, videos[0][1], outname)
-			# self.processDL.map(downloadYT, [videos[0][1], outname])
+			videos = youtubeApi.youtube_search(query = youtubeQuery, 
+												max_results = self.num_buttons)
 
-			# input_queue.put([videos[0][1], outname])
-			
-			self.index_replace += 1
-			# print (playurl)
-			# downloadYouTube(playurl, '/Users/macoscar/Documents/04_Projects/03_ArtWork/MTW/TECHNICAL/FABRA_LIVEMEDIA/vids')
+			if videos:
+				print ('[Debug] This is the first video', videos[0][0])
+				
+				print ('[Debug] Submitting to thread', videos[0][1], 'with name', outname)
 
-			# print ('This is the url', playurl)
+				with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
+					executor.submit(downloadYT, videos[0][1], videos[0][0], outname)
+
+		
+		self.index_replace += 1
+		if self.index_replace > self.num_buttons -1: self.index_replace = 0
+
 		return True
 
 	def on_error(self, status):
 		print(status)
 
 class YouTubeClient(object):
+	
 	def __init__(self, service_name, api_version, developer_key): 
 
 		self.service_name = service_name
@@ -181,7 +224,10 @@ class YouTubeClient(object):
 		search_response = self.youtube.search().list(
 			q=query,
 			part='id,snippet',
-			maxResults=max_results
+			maxResults=max_results,
+			type='video',
+			videoDuration='short',
+			order='viewCount'
 		).execute()
 
 		videos = list(tuple())
@@ -196,8 +242,6 @@ class YouTubeClient(object):
 
 if __name__ == '__main__':
 
-	
-	# twitterApi = TwitterClient(CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET) 
 	# YoutubeClient object
 	youtubeApi = YouTubeClient(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, DEVELOPER_KEY)
 	
@@ -213,4 +257,4 @@ if __name__ == '__main__':
 
 	stream = Stream(twitterAuth, twitterListener)
 	stream.filter(track=['@MTW_LIVE'], async=True)
-	print ('Listening to @MTW_LIVE')
+	print ('[Debug] Listening to @MTW_LIVE')
