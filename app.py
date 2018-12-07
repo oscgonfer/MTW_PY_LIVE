@@ -1,7 +1,5 @@
 #!/usr/bin/python
 
-save_path = '/Users/macoscar/Documents/04_Projects/03_ArtWork/MTW/TECHNICAL/FABRA_LIVEMEDIA/vids'
-
 import re
 import datetime
 
@@ -10,12 +8,11 @@ from os import getcwd
 from os.path import join
 
 import time
+import json
 
+# Multiprocessing and threads
 from multiprocessing import Process, Queue, current_process, freeze_support
 import multiprocessing
-# input_queue = Queue()
-# output_queue = Queue()
-
 import concurrent.futures
 import subprocess
 
@@ -24,6 +21,13 @@ with open(join(getcwd(), '.env')) as environment:
 	for var in environment:
 		key = var.split('=')
 		os.environ[key[0]] = re.sub('\n','',key[1])
+
+save_path = join(getcwd(), 'vids')
+
+# Create tweet_list
+# tweet_list_js = join(getcwd(), 'tweets_list.json')
+# if not os.path.isfile(tweet_list_js):
+# 	json.dump(,tweet_list_js)		
 
 # Twitter
 from tweepy import OAuthHandler 
@@ -36,7 +40,8 @@ CONSUMER_SECRET = os.environ['consumer_secret']
 ACCESS_TOKEN = os.environ['access_token']
 ACCESS_TOKEN_SECRET = os.environ['access_token_secret']
 
-list_tweets = list()
+dict_tweets = dict()
+index_tweets = 0
 
 # Youtube
 from googleapiclient.discovery import build
@@ -50,6 +55,10 @@ DEVELOPER_KEY = os.environ['api_key']
 # OSC
 from pythonosc import dispatcher
 from pythonosc import osc_server
+
+# Parsing urls
+from urllib.parse import urlparse
+import urllib.request
 
 class OSCClient(multiprocessing.Process):
 
@@ -80,11 +89,14 @@ class OSCClient(multiprocessing.Process):
 
 		# Check new topic and copy 16 videos
 
-def downloadYT(video_id, video_name, outname):
+def downloadYT(video_url, outname):
 
-	url = 'https://www.youtube.com/watch?v={0}'.format(video_id)
+	# Extract url
+	url_parse = urlparse(video_url)
+	video_id = url_parse.query
+	video_id = video_id[video_id.find('=')+1:]
 
-	print ('[Debug] Downloading', url, 'to', outname + '.mp3')
+	print ('[Debug] Downloading', video_url, 'to', outname + '.mp3')
 
 	ydl_opts = {
 		'format': 'bestaudio/best',
@@ -100,7 +112,7 @@ def downloadYT(video_id, video_name, outname):
 	}
 				
 	with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-		ydl.download([url])
+		ydl.download([video_url])
 
 	filename = video_id + '.mp3'
 	original_name = join(getcwd(), 'vids', filename)
@@ -124,6 +136,7 @@ class TwitterListener(StreamListener):
 		self.num_buttons = num_buttons
 		self.list_replace = range(0,self.num_buttons)
 		self.index_replace = 0
+		self.index_tweets = 0
 	
 	def clean_tweet(self, tweet): 
 		''' 
@@ -147,26 +160,36 @@ class TwitterListener(StreamListener):
   
 		# saving text of tweet 
 		parsed_tweet['text'] = status.text 
-		parsed_tweet['date'] = status.created_at
+		parsed_tweet['date'] = status.created_at.isoformat()
+		parsed_tweet['author'] = status.user.name
 
 		# saving sentiment of tweet 
 		# parsed_tweet['clean_text'] = self.clean_tweet(re.sub('LIVE ', '', status.text))
 		
 		parsed_tweet['clean_text'] = re.sub('@MTW_LIVE ', '', status.text)
-		list_tweets.append(parsed_tweet)
+
+		dict_tweets[str(self.index_tweets)] = dict()
+		dict_tweets[str(self.index_tweets)]['text'] = parsed_tweet['text']
+		dict_tweets[str(self.index_tweets)]['date'] = parsed_tweet['date']
+		dict_tweets[str(self.index_tweets)]['author'] = parsed_tweet['author']
+		dict_tweets[str(self.index_tweets)]['clean_text'] = parsed_tweet['clean_text']
+
+		self.index_tweets += 1
+
+		with open(join(getcwd(), 'tweets_list.json'), 'w') as tweet_list_js:
+			json.dump(dict_tweets, tweet_list_js)
 
 		# Check what it is
-		try:
-			check_quote = re.findall(r'"([^"]*)"', parsed_tweet['clean_text'])
-		except:
-			check_quote = ''
-		
+		check_quote = re.findall(r'"([^"]*)"', parsed_tweet['clean_text'])
+
 		replace_name = self.list_replace[self.index_replace]
 		outname = 'S'+str(replace_name)
 
-		print (parsed_tweet['clean_text'], check_quote)
-		if check_quote != '':
+		print ('[Debug]', parsed_tweet['clean_text'], check_quote)
+
+		if check_quote != []:
 			# Assume they want a readout
+			print ('[Debug] quote requested')
 			bashCommand = "say -v Trinoids -o " + outname + '.aiff ' + str(check_quote)
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)			
@@ -179,23 +202,48 @@ class TwitterListener(StreamListener):
 			bashCommand = ('mv ' + outname + '.mp3 ' + 'vids/' + outname + '.mp3')
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)
+		
 		else:
 
-			youtubeQuery = parsed_tweet['clean_text']
-			print ('[Debug] Checking for', youtubeQuery)
+			# Parse as url
+			check_url = urlparse(parsed_tweet['clean_text'])
+			print ('[Debug] ', check_url)
 
-			videos = youtubeApi.youtube_search(query = youtubeQuery, 
-												max_results = self.num_buttons)
+			if check_url.netloc == '':
 
-			if videos:
-				print ('[Debug] This is the first video', videos[0][0])
-				
-				print ('[Debug] Submitting to thread', videos[0][1], 'with name', outname)
+				youtubeQuery = parsed_tweet['clean_text']
+				print ('[Debug] Checking for', youtubeQuery)
+
+				videos = youtubeApi.youtube_search(query = youtubeQuery, 
+													max_results = self.num_buttons)
+
+				if videos:
+					print ('[Debug] This is the first video', videos[0][0])
+					
+					print ('[Debug] Submitting to thread', videos[0][1], 'with name', outname)
+
+					url = 'https://www.youtube.com/watch?v={0}'.format(videos[0][1])
+					print ('[Debug] Requested url', url)
+					
+					with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
+						executor.submit(downloadYT, url, outname)
+
+			elif check_url.netloc == 'youtu.be' or check_url.netloc == 'www.youtube.com':
+				url = parsed_tweet['clean_text']
 
 				with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
-					executor.submit(downloadYT, videos[0][1], videos[0][0], outname)
+					executor.submit(downloadYT, url, outname)
+			elif check_url.netloc == 't.co':
+				# Checking twitter link
+				opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
+				request = opener.open(parsed_tweet['clean_text'])
 
-		
+				url = request.url
+				print ('[Debug] Requested url', url)
+
+				with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
+					executor.submit(downloadYT, url, outname)
+
 		self.index_replace += 1
 		if self.index_replace > self.num_buttons -1: self.index_replace = 0
 
