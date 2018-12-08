@@ -5,3 +5,5 @@ Word_Analysis.ipynb
 .ipynb_checkpoints/
 
 *.mp3
+list_topics.txt
+tweets_list.json
