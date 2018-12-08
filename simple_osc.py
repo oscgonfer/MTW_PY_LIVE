@@ -1,5 +1,4 @@
-"""Small example OSC client
-This program sends 10 random values between 0.0 and 1.0 to the /filter address,
+"""This program sends 10 random values between 0.0 and 1.0 to the /filter address,
 waiting for 1 seconds between each value.
 """
 import argparse
@@ -19,6 +18,6 @@ if __name__ == "__main__":
 	
 	for x in range(10):
 		message = (random.random())
-		client.send_message("/filter", message)
+		client.send_message("/reset", message)
 		print (message)
 		time.sleep(1)

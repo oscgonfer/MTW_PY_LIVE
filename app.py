@@ -6,6 +6,8 @@ import datetime
 import os
 from os import getcwd
 from os.path import join
+from shutil import copyfile
+import datetime
 
 import time
 import json
@@ -24,12 +26,16 @@ with open(join(getcwd(), '.env')) as environment:
 
 save_path = join(getcwd(), 'vids')
 
-# Create tweet_list
-# tweet_list_js = join(getcwd(), 'tweets_list.json')
-# if not os.path.isfile(tweet_list_js):
-# 	json.dump(,tweet_list_js)		
+# Open topic_list
+topic_path = join(getcwd(), 'list_topics.txt')
+with open(topic_path, 'r') as topic_file:
+	topic_list = topic_file.readlines()
+topic_list = [x.strip() for x in topic_list] 		
+print ('[Debug] Topic file list')
+print ('[Debug]', topic_list)
 
 # Twitter
+import tweepy
 from tweepy import OAuthHandler 
 from tweepy.streaming import StreamListener
 from tweepy import Stream
@@ -41,7 +47,9 @@ ACCESS_TOKEN = os.environ['access_token']
 ACCESS_TOKEN_SECRET = os.environ['access_token_secret']
 
 dict_tweets = dict()
-index_tweets = 0
+
+first_day_show = "2018-12-13"
+second_day_show = "2018-12-14"
 
 # Youtube
 from googleapiclient.discovery import build
@@ -55,6 +63,10 @@ DEVELOPER_KEY = os.environ['api_key']
 # OSC
 from pythonosc import dispatcher
 from pythonosc import osc_server
+from pythonosc import osc_message_builder
+from pythonosc import udp_client
+PYTHON_PORT = 8000
+CPP_PORT = 53000
 
 # Parsing urls
 from urllib.parse import urlparse
@@ -62,12 +74,17 @@ import urllib.request
 
 class OSCClient(multiprocessing.Process):
 
-	def __init__(self, address='localhost', port=8000):
+	def __init__(self, address='localhost', port=8000, threshold_pressed = 60):
 
 		multiprocessing.Process.__init__(self)
 		self.dispatcher = dispatcher.Dispatcher()
 		self.address = address
 		self.port = port
+		self.index_topic = 0
+		self.time_last_pressed = 0
+		self.time_pressed = 0
+		self.threshold_pressed = threshold_pressed
+
 
 	def run(self):
 
@@ -85,16 +102,72 @@ class OSCClient(multiprocessing.Process):
 		print (message)
 
 	def reset_status(self, unused_addr, message):
-		twitterListener.start(num_buttons = 16)
+		print ("[Debug] Reset button pressed")
+		# Check delta between last time pressed
+		self.time_pressed = time.time()
+		if self.time_pressed - self.time_last_pressed > self.threshold_pressed:
+			print ('[Debug] Accepting button pressed')
+			self.time_last_pressed = self.time_pressed
 
-		# Check new topic and copy 16 videos
+			# Actually do stuff
+			twitterListener.start(num_buttons = 16)
+
+			# Check new topic and copy 16 videos
+			next_topic = topic_list[self.index_topic]
+			self.index_topic += 1
+			if self.index_topic > len(topic_list) - 1: self.index_topic = 0
+			
+			try:
+				print ('[Debug] Copying files from', next_topic)
+				
+				dest = save_path
+				source = join(save_path, next_topic)
+
+				for root, dirs, files in os.walk(source):
+					for _file in files:
+						if _file.endswith(".mp3"):
+							filePathSource = join(source, _file)
+							filePathDest = join(dest, _file)
+							copyfile(filePathSource, filePathDest)
+			except:
+				print ('[Debug] Failure copying files')
+				pass
+			
+			tweetReset(next_topic)
+		else:
+			print ('[Debug] Ignoring button pressed, not enough time')
+
+def tweetReset(topic):
+	print('[Debug] Post tweet with topic', topic)
+
+	now = datetime.datetime.now().strftime("%Y-%m-%d")
+	try:
+		if now < first_day_show:
+			print ('[Debug] Still testing:', '[Test tweet] Now, let’s talk about: {}'.format(topic))
+			twitterAPI.update_status('[Test tweet] Now, let’s talk about: {}'.format(topic))
+
+		elif now == first_day_show:
+			print ('[Debug] First day!')
+
+			twitterAPI.update_status('Now, let’s talk about: {}. What are your fears about technology related to {}? Send us a link to a YouTube video or simply your thoughts. #MoreThanWordsLive #codenowness'.format(topic, topic))
+		elif now == second_day_show:
+			print ('[Debug] Second day!')
+
+			twitterAPI.update_status('Now, let’s talk about: {}. What do you expect technology will one day be able to do regarding {}? Send us a link to a YouTube video or simply your thoughts. #MoreThanWordsLive #codenowness'.format(topic, topic))
+	except:
+		print('[Debug] Could not post tweet with topic', topic) 
+		pass
 
 def downloadYT(video_url, outname):
 
 	# Extract url
-	url_parse = urlparse(video_url)
-	video_id = url_parse.query
-	video_id = video_id[video_id.find('=')+1:]
+	try:
+		url_parse = urlparse(video_url)
+		video_id = url_parse.query
+		video_id = video_id[video_id.find('=')+1:]
+	except:
+		print ('[Debug] Error parsing url')
+		pass
 
 	print ('[Debug] Downloading', video_url, 'to', outname + '.mp3')
 
@@ -110,23 +183,32 @@ def downloadYT(video_url, outname):
 			'preferredquality': '192'
 		}],
 	}
+
+	try:
 				
-	with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-		ydl.download([video_url])
+		with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+			ydl.download([video_url])
 
-	filename = video_id + '.mp3'
-	original_name = join(getcwd(), 'vids', filename)
-	target_name = join(save_path, outname + '.mp3')
+	except:
+		print('[Debug] Error downloading YT video')
+		pass
 
-	print ('[Debug] Moving file', original_name, 'to', target_name)
+	try:
+		filename = video_id + '.mp3'
+		original_name = join(getcwd(), 'vids', filename)
+		target_name = join(save_path, outname + '.mp3')
 
-	if os.path.isfile(original_name):
-		os.rename(original_name, target_name)
-		print ('[Debug] File moved')
-	else:
-		print ('[Debug] File does not exist')
+		print ('[Debug] Moving file', original_name, 'to', target_name)
 
-	print ('[Debug] Finished video download')
+		if os.path.isfile(original_name):
+			os.rename(original_name, target_name)
+			print ('[Debug] File moved')
+		else:
+			print ('[Debug] File does not exist')
+
+		print ('[Debug] Finished video download')
+	except:
+		print ('[Debug] Error moving file')
 
 class TwitterListener(StreamListener):
 	""" A listener handles tweets that are received from the stream.
@@ -202,6 +284,8 @@ class TwitterListener(StreamListener):
 			bashCommand = ('mv ' + outname + '.mp3 ' + 'vids/' + outname + '.mp3')
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)
+
+			soundType = 'quote'
 		
 		else:
 
@@ -227,7 +311,6 @@ class TwitterListener(StreamListener):
 					
 					with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
 						executor.submit(downloadYT, url, outname)
-
 			elif check_url.netloc == 'youtu.be' or check_url.netloc == 'www.youtube.com':
 				url = parsed_tweet['clean_text']
 
@@ -243,6 +326,16 @@ class TwitterListener(StreamListener):
 
 				with concurrent.futures.ThreadPoolExecutor(max_workers = 4) as executor:
 					executor.submit(downloadYT, url, outname)
+
+			soundType = 'loop'
+
+		## Send New sound to C++
+		if soundType == 'quote': message = 1
+		elif soundType == 'loop': message = 2
+		
+		cpp_client.send_message('/sound', [self.index_replace, message])
+		print ('[Debug] Send message', '/sound', self.index_replace, message)
+
 
 		self.index_replace += 1
 		if self.index_replace > self.num_buttons -1: self.index_replace = 0
@@ -296,13 +389,34 @@ if __name__ == '__main__':
 	# TwitterListener object 
 	twitterListener = TwitterListener()
 	twitterListener.start(num_buttons = 16)
+
+	# Twitter
 	twitterAuth = OAuthHandler(CONSUMER_KEY, CONSUMER_SECRET)
 	twitterAuth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
+	twitterAPI = tweepy.API(twitterAuth)
 
-	workerOSC = OSCClient(address = '127.0.0.1', port = 8000)
+	now = datetime.datetime.now().strftime("%Y-%m-%d")
+	if now < first_day_show:
+		print ('[Debug] Still testing')
+		twitterAPI.update_status("[Test tweet] Hello everyone! We are testing our installation!")
+
+	elif now == first_day_show:
+		print ('[Debug] First day!')
+
+		twitterAPI.update_status("Today we will talk about technology and it's implications. What are your fears about technology? Send us a link to a YouTube video or simply your thoughts. #MoreThanWordsLive #codenowness")
+	elif now == second_day_show:
+		print ('[Debug] Second day!')
+
+		twitterAPI.update_status("Today we will talk about technology and it's potential. What do you expect technology will one day be able to do in the future? Send us a link to a YouTube video or simply your thoughts. #MoreThanWordsLive #codenowness")
+	
+
+	workerOSC = OSCClient(address = '127.0.0.1', port = PYTHON_PORT)
 	workerOSC.daemon = True
 	workerOSC.start()
 
+	cpp_client = udp_client.SimpleUDPClient('localhost', CPP_PORT)
+	print ('[Debug] OSC Sending on localhost to', CPP_PORT)
+	
 	stream = Stream(twitterAuth, twitterListener)
 	stream.filter(track=['@MTW_LIVE'], async=True)
 	print ('[Debug] Listening to @MTW_LIVE')
