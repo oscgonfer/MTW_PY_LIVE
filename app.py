@@ -164,7 +164,8 @@ def downloadYT(video_url, outname):
 	try:
 		url_parse = urlparse(video_url)
 		video_id = url_parse.query
-		video_id = video_id[video_id.find('=')+1:]
+		if '&' in video_id: video_id = video_id[video_id.find('=')+1:video_id.find('&')]
+		else: video_id = video_id[video_id.find('=')+1:]
 	except:
 		print ('[Debug] Error parsing url')
 		pass
@@ -182,6 +183,7 @@ def downloadYT(video_url, outname):
 			'preferredcodec': 'mp3',
 			'preferredquality': '192'
 		}],
+		'noplaylist': True
 	}
 
 	try:
@@ -398,8 +400,11 @@ if __name__ == '__main__':
 	now = datetime.datetime.now().strftime("%Y-%m-%d")
 	if now < first_day_show:
 		print ('[Debug] Still testing')
-		twitterAPI.update_status("[Test tweet] Hello everyone! We are testing our installation!")
-
+		try:
+			twitterAPI.update_status("[Test tweet] Hello everyone! We are testing our installation!")
+		except:
+			pass
+			
 	elif now == first_day_show:
 		print ('[Debug] First day!')
 
