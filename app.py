@@ -232,7 +232,7 @@ class TwitterListener(StreamListener):
 	def on_status(self, status):
 
 		# Make funny noise
-		bashCommand = "say -v Trinoids 'tweet received'"
+		bashCommand = "say -v 'Tweet received'"
 		os.system(bashCommand)
 
 		# calling function to get tweets 
@@ -274,7 +274,7 @@ class TwitterListener(StreamListener):
 		if check_quote != []:
 			# Assume they want a readout
 			print ('[Debug] quote requested')
-			bashCommand = "say -v Trinoids -o " + outname + '.aiff ' + str(check_quote)
+			bashCommand = "say -o " + outname + '.aiff ' + str(check_quote)
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)			
 			bashCommand = ('lame -m m ' + outname + '.aiff ' + outname + '.mp3')
