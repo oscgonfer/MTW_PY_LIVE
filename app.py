@@ -26,6 +26,7 @@ with open(join(getcwd(), '.env')) as environment:
 
 rootDirectory = abspath(join(getcwd(), pardir))
 save_path = join(rootDirectory, 'MPC-MoreThanWords/MTW/bin/data')
+save_path_json = join(rootDirectory, 'MPC-MoreThanWords/TWITTER_FEED/bin/data')
 
 # Open topic_list
 topic_path = join(getcwd(), 'list_topics.txt')
@@ -263,7 +264,7 @@ class TwitterListener(StreamListener):
 
 		self.index_tweets += 1
 
-		with open(join(getcwd(), 'tweets_list.json'), 'w') as tweet_list_js:
+		with open(join(save_path_json, 'tweets_list.json'), 'w') as tweet_list_js:
 			json.dump(dict_tweets, tweet_list_js)
 
 		# Check what it is
