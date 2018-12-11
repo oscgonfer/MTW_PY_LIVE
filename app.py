@@ -4,8 +4,8 @@ import re
 import datetime
 
 import os
-from os import getcwd
-from os.path import join
+from os import getcwd, pardir
+from os.path import join, abspath
 from shutil import copyfile
 import datetime
 
@@ -24,7 +24,8 @@ with open(join(getcwd(), '.env')) as environment:
 		key = var.split('=')
 		os.environ[key[0]] = re.sub('\n','',key[1])
 
-save_path = join(getcwd(), 'vids')
+rootDirectory = abspath(join(getcwd(), pardir))
+save_path = join(rootDirectory, 'MPC-MoreThanWords/MTW/bin/data')
 
 # Open topic_list
 topic_path = join(getcwd(), 'list_topics.txt')
@@ -175,7 +176,7 @@ def downloadYT(video_url, outname):
 	ydl_opts = {
 		'format': 'bestaudio/best',
  		'extractaudio': True,
- 		'outtmpl': 'vids/%(id)s.%(ext)s',
+ 		'outtmpl': join(save_path, '%(id)s.%(ext)s'),
 		'verbose' : True,
 		'forcefilename': True,
 		'postprocessors': [{
@@ -197,8 +198,10 @@ def downloadYT(video_url, outname):
 
 	try:
 		filename = video_id + '.mp3'
-		original_name = join(getcwd(), 'vids', filename)
+		original_name = join(save_path, filename)
+		print (original_name)
 		target_name = join(save_path, outname + '.mp3')
+		print
 
 		print ('[Debug] Moving file', original_name, 'to', target_name)
 
@@ -232,7 +235,7 @@ class TwitterListener(StreamListener):
 	def on_status(self, status):
 
 		# Make funny noise
-		bashCommand = "say -v 'Tweet received'"
+		bashCommand = "say -v 'Trinoids' 'Tweet received'"
 		os.system(bashCommand)
 
 		# calling function to get tweets 
@@ -283,7 +286,7 @@ class TwitterListener(StreamListener):
 			bashCommand = ('rm ' + outname + '.aiff')
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)			
-			bashCommand = ('mv ' + outname + '.mp3 ' + 'vids/' + outname + '.mp3')
+			bashCommand = ('mv ' + outname + '.mp3 ' + join(save_path, outname + '.mp3'))
 			os.system(bashCommand)
 			print ('[Debug]', bashCommand)
 
