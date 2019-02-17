@@ -27,6 +27,8 @@ with open(join(getcwd(), '.env')) as environment:
 rootDirectory = abspath(join(getcwd(), pardir))
 save_path = join(rootDirectory, 'MPC-MoreThanWords/MTW/bin/data')
 save_path_json = join(rootDirectory, 'MPC-MoreThanWords/TWITTER_FEED/bin/data')
+print ('[Debug]', save_path)
+print ('[Debug]', save_path_json)
 
 # Open topic_list
 topic_path = join(getcwd(), 'list_topics.txt')
@@ -50,8 +52,11 @@ ACCESS_TOKEN_SECRET = os.environ['access_token_secret']
 
 dict_tweets = dict()
 
-first_day_show = "2018-12-13"
-second_day_show = "2018-12-14"
+# Changing data
+first_day_show = "2019-12-13"
+second_day_show = "2019-12-14"
+threshold_reset = 270
+num_buttons = 16
 
 # Youtube
 from googleapiclient.discovery import build
@@ -101,10 +106,13 @@ class OSCClient(multiprocessing.Process):
 		self.server.serve_forever()
 
 	def print_message(self, unused_addr, message):
+
 		print (message)
 
 	def reset_status(self, unused_addr, message):
+
 		print ("[Debug] Reset button pressed")
+
 		# Check delta between last time pressed
 		self.time_pressed = time.time()
 		if self.time_pressed - self.time_last_pressed > self.threshold_pressed:
@@ -112,7 +120,7 @@ class OSCClient(multiprocessing.Process):
 			self.time_last_pressed = self.time_pressed
 
 			# Actually do stuff
-			twitterListener.start(num_buttons = 16)
+			twitterListener.start(num_buttons = num_buttons)
 
 			# Check new topic and copy 16 videos
 			next_topic = topic_list[self.index_topic]
@@ -222,8 +230,7 @@ class TwitterListener(StreamListener):
 	"""
 	def start(self, num_buttons):
 		self.num_buttons = num_buttons
-		# self.list_replace = range(0,self.num_buttons)
-		self.list_replace = range(0,16)
+		self.list_replace = range(0,self.num_buttons)
 		self.index_replace = 0
 		self.index_tweets = 0
 	
@@ -235,11 +242,14 @@ class TwitterListener(StreamListener):
 		return ' '.join(re.sub("(@[A-Za-z0-9]+)|([^0-9A-Za-z \t])|(\w+:\/\/\S+)", " ", tweet).split()) 
 
 	def on_status(self, status):
+
+		print (type(status))
+		
 		try:	
 			full_tweet = status.extended_tweet
 		except:
 			full_tweet = status
-		# print (full_tweet.keys())
+		
 		# Make funny noise
 		bashCommand = "say -v 'Trinoids' 'Tweet received'"
 		os.system(bashCommand)
@@ -256,34 +266,42 @@ class TwitterListener(StreamListener):
 			parsed_tweet['text'] = full_tweet['full_text'] 
 		except:
 			parsed_tweet['text'] = status.text
+
 		parsed_tweet['date'] = status.created_at.isoformat()
 		parsed_tweet['author'] = status.user.name
+		parsed_tweet['handle'] = status.user.screen_name
 
 		# saving sentiment of tweet 
 		# parsed_tweet['clean_text'] = self.clean_tweet(re.sub('LIVE ', '', full_tweet.full_text))
-		
-		try:
-			parsed_tweet['clean_text'] = re.sub('@MTW_LIVE ', '', full_tweet['full_text'])
-		except:
-			parsed_tweet['clean_text'] = re.sub('@MTW_LIVE ', '', status.text)
-		
-		print ("[Debug] parsed_tweet-clean_text", parsed_tweet['clean_text'])
-		print ("[Debug] parsed_tweet-text", parsed_tweet['text'])
+
+		# Clean text
+		parsed_tweet['clean_text'] = re.sub('@MTW_LIVE ', '', parsed_tweet['text'])
+		parsed_tweet['clean_text'] = re.sub('\n', '', parsed_tweet['clean_text'])
+		# Change quote weird character for actual unicode
+		parsed_tweet['clean_text'] = re.sub('\u201c', '"', parsed_tweet['clean_text'])
+		parsed_tweet['clean_text'] = re.sub('\u201d', '"', parsed_tweet['clean_text'])
+
 		dict_tweets[str(self.index_tweets)] = dict()
 		dict_tweets[str(self.index_tweets)]['text'] = parsed_tweet['text']
 		dict_tweets[str(self.index_tweets)]['date'] = parsed_tweet['date']
 		dict_tweets[str(self.index_tweets)]['author'] = parsed_tweet['author']
 		dict_tweets[str(self.index_tweets)]['clean_text'] = parsed_tweet['clean_text']
-
+		dict_tweets[str(self.index_tweets)]['handle'] = parsed_tweet['handle']
+		
 		self.index_tweets += 1
 
+		# Save tweets list
 		with open(join(save_path_json, 'tweets_list.json'), 'w') as tweet_list_js:
 			json.dump(dict_tweets, tweet_list_js)
+			print ('[Debug] Saving json file')
+
+		print ('[Debug] Tweet author', parsed_tweet['author'])
 
 		if not parsed_tweet['author'] == 'MoreThanWordsLive':
+
 			# Check what it is
 			check_quote = re.findall(r'"([^"]*)"', parsed_tweet['clean_text'])
-			print (check_quote)
+
 			replace_name = self.list_replace[self.index_replace]
 			outname = 'S'+str(replace_name)
 
@@ -356,9 +374,11 @@ class TwitterListener(StreamListener):
 			cpp_client.send_message('/sound', [self.index_replace, message])
 			print ('[Debug] Send message', '/sound', self.index_replace, message)
 
-
 			self.index_replace += 1
 			if self.index_replace > self.num_buttons -1: self.index_replace = 0
+		
+		else:
+			print ('[Debug] Got tweet from ourselves')
 
 		return True
 
@@ -408,7 +428,7 @@ if __name__ == '__main__':
 	
 	# TwitterListener object 
 	twitterListener = TwitterListener()
-	twitterListener.start(num_buttons = 16)
+	twitterListener.start(num_buttons = num_buttons)
 
 	# Twitter
 	twitterAuth = OAuthHandler(CONSUMER_KEY, CONSUMER_SECRET)
@@ -433,7 +453,7 @@ if __name__ == '__main__':
 		twitterAPI.update_status("Today we will talk about technology and it's implications. What do you expect technology will one day be able to do in the future? Send us a link to a YouTube video or simply your thoughts. #morethanwordslive #codenowness")
 	
 
-	workerOSC = OSCClient(address = '127.0.0.1', port = PYTHON_PORT)
+	workerOSC = OSCClient(address = '127.0.0.1', port = PYTHON_PORT, threshold_pressed = threshold_reset)
 	workerOSC.daemon = True
 	workerOSC.start()
 
